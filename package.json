@@ -1,0 +1,11 @@
+{
+  "name": "@codeagent/feature-package-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SDK contracts for CodeAgent feature package development",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts"
+}
