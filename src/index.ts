@@ -247,16 +247,210 @@ export interface FeaturePackageLogger {
   error(message: string, details?: Record<string, unknown>): void;
 }
 
+export interface FeatureAutomationSkill {
+  id: string;
+  name: string;
+  description: string;
+  path: string;
+  content: string;
+}
+
+/** A package-defined actor that can execute one step in a host-managed workflow. */
+export interface FeatureAutomationActor {
+  id: string;
+  name: string;
+  role: string;
+  goal: string;
+  model?: string;
+  tools: string[];
+}
+
+/**
+ * Package-neutral workflow definition persisted and scheduled by the host.
+ * Packages decide what the actors mean (for example, a software delivery team).
+ */
+export interface FeatureAutomationWorkflow {
+  id: string;
+  providerId?: string;
+  name: string;
+  objective: string;
+  workspacePath?: string;
+  permissionMode?: 'supervised' | 'full-access';
+  maxIterations?: number;
+  /** Opaque package-owned workflow configuration. The host persists and forwards it unchanged. */
+  providerConfig?: Record<string, unknown>;
+  supervisorId: string;
+  members: FeatureAutomationActor[];
+}
+
+/** @deprecated Use FeatureAutomationActor. Retained for package API compatibility. */
+export type FeatureAutomationTeamMember = FeatureAutomationActor;
+/** @deprecated Use FeatureAutomationWorkflow. Retained for package API compatibility. */
+export type FeatureAutomationTeamBlueprint = FeatureAutomationWorkflow;
+
+export interface FeatureAutomationAssignment {
+  id: string;
+  title: string;
+  description: string;
+  memberId: string;
+  memberName: string;
+  role: string;
+  dependencies: string[];
+  parallelGroup: number;
+  kind?: string;
+  workspaceMode?: 'isolated' | 'shared';
+  requiresArtifact?: boolean;
+  requiresNonDocumentationArtifact?: boolean;
+  goalIds?: string[];
+  acceptanceCriteria?: string[];
+  expectedArtifacts?: string[];
+  producedArtifacts?: string[];
+  workspacePath?: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  startedAt?: number;
+  completedAt?: number;
+  output?: string;
+  error?: string;
+}
+
+export interface FeatureAutomationRunStep {
+  memberId: string;
+  memberName: string;
+  role: string;
+  assignmentId?: string;
+  assignmentTitle?: string;
+  status: 'running' | 'succeeded' | 'failed';
+  output?: string;
+  error?: string;
+}
+
+export interface FeatureAutomationRun {
+  id: string;
+  workflowId: string;
+  workflowName: string;
+  /** @deprecated Persisted compatibility field. Use workflowId. */
+  teamId?: string;
+  /** @deprecated Persisted compatibility field. Use workflowName. */
+  teamName?: string;
+  objective: string;
+  status: 'running' | 'succeeded' | 'failed';
+  assignments?: FeatureAutomationAssignment[];
+  steps: FeatureAutomationRunStep[];
+}
+
+export interface FeatureAutomationPlannerContext {
+  workspacePath: string;
+  enabledSkills: FeatureAutomationSkill[];
+  attempt: number;
+  maxAttempts: number;
+  validationFailure?: string;
+}
+
+export interface FeatureAutomationMemberContext {
+  runId: string;
+  workspacePath: string;
+  enabledSkills: FeatureAutomationSkill[];
+  assignment: FeatureAutomationAssignment;
+  previousSteps: FeatureAutomationRunStep[];
+  sharedSteps: FeatureAutomationRunStep[];
+  attempt: number;
+  maxAttempts: number;
+  verificationFailure?: string;
+}
+
+export interface FeatureAutomationRunPreparationContext {
+  workspacePath: string;
+}
+
+export interface FeatureAutomationAssignmentPreparationContext {
+  workspacePath: string;
+  dependencyOutputs: FeatureAutomationRunStep[];
+}
+
+export interface FeatureAutomationArtifactContext {
+  workspacePath: string;
+  assignment: FeatureAutomationAssignment;
+}
+
+/** Evidence collected by the host after an automation actor reports completion. */
+export interface FeatureAutomationAssignmentValidationContext {
+  workspacePath: string;
+  output: string;
+  /**
+   * Machine-readable completion data submitted through the host's structured
+   * finish tool. Providers should prefer this over parsing control records out
+   * of user-facing prose.
+   */
+  completionRecord?: Record<string, unknown>;
+  producedArtifacts: string[];
+  dependencyOutputs: FeatureAutomationRunStep[];
+}
+
+/** Package-owned policy for a professional automation workflow. The host only executes this plan. */
+export interface FeaturePackageAutomationProvider {
+  id: string;
+  createDefaultWorkflow?(objective: string, workspacePath: string): Partial<FeatureAutomationWorkflow>;
+  /** @deprecated Implement createDefaultWorkflow instead. */
+  createDefaultTeam?(objective: string, workspacePath: string): Partial<FeatureAutomationTeamBlueprint>;
+  prepareRun?(
+    workflow: FeatureAutomationWorkflow,
+    run: FeatureAutomationRun,
+    context: FeatureAutomationRunPreparationContext,
+  ): void | Promise<void>;
+  prepareAssignment?(
+    workflow: FeatureAutomationWorkflow,
+    run: FeatureAutomationRun,
+    assignment: FeatureAutomationAssignment,
+    context: FeatureAutomationAssignmentPreparationContext,
+  ): void | Promise<void>;
+  /**
+   * Package-owned workflow metadata that must not count as a delivered artifact.
+   * Paths are relative to the assignment workspace. The host treats every other
+   * changed file as a candidate deliverable without knowing package conventions.
+   */
+  internalArtifactPaths?(context: FeatureAutomationArtifactContext): string[];
+  buildPlannerPrompt(workflow: FeatureAutomationWorkflow, context: FeatureAutomationPlannerContext): string;
+  parseAssignmentPlan(content: string, workflow: FeatureAutomationWorkflow): FeatureAutomationAssignment[];
+  validateAssignmentPlan(workflow: FeatureAutomationWorkflow, assignments: FeatureAutomationAssignment[]): string | undefined;
+  createFallbackAssignmentPlan?(workflow: FeatureAutomationWorkflow, maxIterations: number): FeatureAutomationAssignment[];
+  buildMemberPrompt(
+    workflow: FeatureAutomationWorkflow,
+    actor: FeatureAutomationActor,
+    context: FeatureAutomationMemberContext,
+  ): string;
+  /**
+   * Package-owned completion gate. The host invokes this after its filesystem
+   * checks and before promoting isolated assignment artifacts.
+   */
+  validateAssignmentCompletion?(
+    workflow: FeatureAutomationWorkflow,
+    run: FeatureAutomationRun,
+    assignment: FeatureAutomationAssignment,
+    context: FeatureAutomationAssignmentValidationContext,
+  ): string | undefined | Promise<string | undefined>;
+  validateCompletedRun?(
+    workflow: FeatureAutomationWorkflow,
+    run: FeatureAutomationRun,
+  ): string | undefined | Promise<string | undefined>;
+}
+
 export interface FeaturePackageRuntimeContext {
   shell: FeatureShell;
   packageRoot: string;
   manifest: FeaturePackageManifest;
   logger: FeaturePackageLogger;
   registerExtension(extension: FeaturePackageExtensionRegistration): void;
+  registerAutomationProvider(provider: FeaturePackageAutomationProvider): void;
 }
 
 export interface FeaturePackageActivationResult {
   registeredExtensions?: FeaturePackageExtensionRegistration[];
+  registeredAutomationProviderIds?: string[];
+}
+
+/** CLI entrypoint exported by a feature package runtime bundle. */
+export interface FeaturePackageCliModule {
+  runCliCommand(command: string, args: string): Promise<string>;
 }
 
 export interface FeaturePackageRuntimeModule {
